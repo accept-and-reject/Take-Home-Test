@@ -1,4 +1,4 @@
-"""Minimal Browser Service runtime for the C01 environment checkpoint.
+"""Browser Service runtime and local persistence health endpoint.
 
 Design references:
 - doc/03_開發規則/01_環境文件.md, Development Environment
@@ -8,14 +8,18 @@ Design references:
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from services.browser_service.store import BrowserRunStore
+from shared.settings import BrowserSettings
+
 
 SERVICE_NAME = "browser-executor-service"
-DATA_DIR = Path(os.getenv("BROWSER_DATA_DIR", "/app/data"))
+SETTINGS = BrowserSettings.from_env()
+STORE = BrowserRunStore(SETTINGS.data_dir)
+STORE.initialize()
 
 app = FastAPI(title="Browser Executor Service", version="0.1.0")
 
@@ -31,10 +35,13 @@ def root() -> dict[str, str]:
 def health() -> JSONResponse:
     """Report local readiness without opening a browser."""
 
-    storage_ready = DATA_DIR.is_dir() and os.access(DATA_DIR, os.W_OK)
-    status = "healthy" if storage_ready else "unhealthy"
+    storage_ready = SETTINGS.data_dir.is_dir() and os.access(
+        SETTINGS.data_dir, os.W_OK
+    )
+    database_ready = storage_ready and STORE.is_healthy()
+    status = "healthy" if database_ready else "unhealthy"
     return JSONResponse(
-        status_code=200 if storage_ready else 503,
+        status_code=200 if database_ready else 503,
         content={
             "service": SERVICE_NAME,
             "status": status,
@@ -42,6 +49,7 @@ def health() -> JSONResponse:
             "checks": {
                 "http": "healthy",
                 "storage": "healthy" if storage_ready else "unhealthy",
+                "database": "healthy" if database_ready else "unhealthy",
                 "browser_runtime": "not_started",
             },
         },
@@ -55,9 +63,9 @@ def main() -> None:
 
     uvicorn.run(
         "services.browser_service.entrypoint:app",
-        host=os.getenv("HOST", "0.0.0.0"),
-        port=int(os.getenv("PORT", "8000")),
-        log_level=os.getenv("LOG_LEVEL", "INFO").lower(),
+        host=SETTINGS.host,
+        port=SETTINGS.port,
+        log_level=SETTINGS.log_level.lower(),
     )
 
 

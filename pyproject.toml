@@ -21,4 +21,4 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["services*"]
+include = ["services*", "shared*"]
