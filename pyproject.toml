@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meeting-action-research-assistant"
+version = "0.1.0"
+description = "Traceable meeting knowledge and scoped company research services."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi==0.143.0",
+  "mcp==2.3.0",
+  "openai==3.26.1",
+  "playwright==1.63.0",
+  "pydantic==2.14.0",
+  "pypdf==6.19.0",
+  "python-pptx==1.0.2",
+  "qdrant-client==1.19.1",
+  "reportlab==5.0.1",
+  "uvicorn==0.54.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["services*"]

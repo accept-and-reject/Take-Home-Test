@@ -1,0 +1,84 @@
+name: ai-application-engineer-home-test
+
+services:
+  knowledge-mcp-service:
+    build:
+      context: .
+      dockerfile: services/knowledge_service/Dockerfile
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      HOST: 0.0.0.0
+      PORT: 8000
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?copy .env.example to .env and set OPENAI_API_KEY}
+      KNOWLEDGE_PUBLIC_BASE_URL: ${KNOWLEDGE_PUBLIC_BASE_URL:-http://localhost:8001}
+      KNOWLEDGE_DATA_DIR: /app/data
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      KNOWLEDGE_AGENT_MODEL: ${KNOWLEDGE_AGENT_MODEL:-gpt-6-luna}
+      MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:?set MCP_BEARER_TOKEN in .env}
+      BROWSER_EXECUTOR_BASE_URL: http://browser-executor-service:8000
+      BROWSER_EXECUTOR_TOKEN: ${BROWSER_EXECUTOR_TOKEN:?set BROWSER_EXECUTOR_TOKEN in .env}
+      BROWSER_REQUEST_TIMEOUT_SECONDS: ${BROWSER_REQUEST_TIMEOUT_SECONDS:-180}
+    ports:
+      - "${KNOWLEDGE_PORT:-8001}:8000"
+    volumes:
+      - knowledge-data:/app/data
+    networks:
+      - application-network
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  browser-executor-service:
+    build:
+      context: .
+      dockerfile: services/browser_service/Dockerfile
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      HOST: 0.0.0.0
+      PORT: 8000
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?copy .env.example to .env and set OPENAI_API_KEY}
+      BROWSER_PUBLIC_BASE_URL: ${BROWSER_PUBLIC_BASE_URL:-http://localhost:8002}
+      BROWSER_DATA_DIR: /app/data
+      AGENT_MODEL: ${AGENT_MODEL:-gpt-6-luna}
+      AGENT_REASONING_EFFORT: ${AGENT_REASONING_EFFORT:-low}
+      BROWSER_EXECUTOR_TOKEN: ${BROWSER_EXECUTOR_TOKEN:?set BROWSER_EXECUTOR_TOKEN in .env}
+      DEMO_API_TOKEN: ${DEMO_API_TOKEN:?set DEMO_API_TOKEN in .env}
+      COMPANY_NAME: ${COMPANY_NAME:-瑞鼎科技}
+      START_URL: ${START_URL:?set START_URL in .env}
+      ALLOWED_DOMAIN: ${ALLOWED_DOMAIN:?set ALLOWED_DOMAIN in .env}
+      MAX_PAGES: ${MAX_PAGES:-5}
+      MAX_DAILY_BROWSER_RUNS: ${MAX_DAILY_BROWSER_RUNS:-20}
+      MAX_CONCURRENT_BROWSER_RUNS: ${MAX_CONCURRENT_BROWSER_RUNS:-1}
+    ports:
+      - "${BROWSER_PORT:-8002}:8000"
+    volumes:
+      - browser-data:/app/data
+    networks:
+      - application-network
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+networks:
+  application-network:
+    driver: bridge
+
+volumes:
+  knowledge-data:
+  browser-data:
