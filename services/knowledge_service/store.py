@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Sequence, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel
+from qdrant_client import QdrantClient, models
 
 from shared.contracts import (
     ActionItem,
@@ -268,6 +269,61 @@ class KnowledgeApplicationDataStore:
             _decode_json_columns(row, "project_hints", "embedding")
         )
 
+    def replace_content_chunks(
+        self, source_id: UUID, chunks: Sequence[ContentChunk]
+    ) -> None:
+        """Atomically replace every application-store chunk for one source."""
+
+        with self.database.connect() as connection:
+            connection.execute(
+                "DELETE FROM content_chunks WHERE source_id = ?", (str(source_id),)
+            )
+            connection.executemany(
+                """
+                INSERT INTO content_chunks (
+                    chunk_id, source_id, sequence, content, meeting_date,
+                    project_hints, locator_type, locator_value, embedding,
+                    embedding_model, content_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        str(chunk.chunk_id), str(chunk.source_id), chunk.sequence,
+                        chunk.content,
+                        chunk.meeting_date.isoformat()
+                        if chunk.meeting_date else None,
+                        json.dumps(chunk.project_hints, ensure_ascii=False),
+                        chunk.locator_type.value, chunk.locator_value,
+                        json.dumps(chunk.embedding), chunk.embedding_model,
+                        chunk.content_hash,
+                    )
+                    for chunk in chunks
+                ],
+            )
+
+    def list_content_chunks(self, source_id: UUID) -> list[ContentChunk]:
+        rows = self.database.fetch_all(
+            """
+            SELECT * FROM content_chunks
+            WHERE source_id = ? ORDER BY sequence
+            """,
+            (str(source_id),),
+        )
+        return [
+            ContentChunk.model_validate(
+                _decode_json_columns(row, "project_hints", "embedding")
+            )
+            for row in rows
+        ]
+
+    def count_source_documents(self) -> int:
+        row = self.database.fetch_one("SELECT COUNT(*) AS count FROM source_documents")
+        return int(row["count"]) if row else 0
+
+    def count_content_chunks(self) -> int:
+        row = self.database.fetch_one("SELECT COUNT(*) AS count FROM content_chunks")
+        return int(row["count"]) if row else 0
+
     def save_action_item(self, item: ActionItem) -> None:
         data = _payload(item)
         with self.database.connect() as connection:
@@ -383,3 +439,63 @@ class KnowledgeApplicationDataStore:
             (str(request_id),),
         )
         return [SearchResultItem.model_validate(row) for row in rows]
+
+
+class VectorKnowledgeStore:
+    """Persist semantic vectors separately from Knowledge application data."""
+
+    COLLECTION_NAME = "meeting_content_chunks"
+
+    def __init__(self, data_dir: Path) -> None:
+        self._client = QdrantClient(path=str(data_dir / "qdrant"))
+
+    def initialize(self, vector_size: int) -> None:
+        if self._client.collection_exists(self.COLLECTION_NAME):
+            return
+        self._client.create_collection(
+            collection_name=self.COLLECTION_NAME,
+            vectors_config=models.VectorParams(
+                size=vector_size,
+                distance=models.Distance.COSINE,
+            ),
+        )
+
+    def upsert_chunks(self, chunks: Sequence[ContentChunk]) -> None:
+        if not chunks:
+            return
+        self._client.upsert(
+            collection_name=self.COLLECTION_NAME,
+            wait=True,
+            points=[
+                models.PointStruct(
+                    id=str(chunk.chunk_id),
+                    vector=chunk.embedding,
+                    payload={
+                        "source_id": str(chunk.source_id),
+                        "sequence": chunk.sequence,
+                        "content": chunk.content,
+                        "meeting_date": (
+                            chunk.meeting_date.isoformat()
+                            if chunk.meeting_date else None
+                        ),
+                        "project_hints": chunk.project_hints,
+                        "locator_type": chunk.locator_type.value,
+                        "locator_value": chunk.locator_value,
+                        "content_hash": chunk.content_hash,
+                    },
+                )
+                for chunk in chunks
+            ],
+        )
+
+    def count_chunks(self) -> int:
+        if not self._client.collection_exists(self.COLLECTION_NAME):
+            return 0
+        result = self._client.count(
+            collection_name=self.COLLECTION_NAME,
+            exact=True,
+        )
+        return result.count
+
+    def close(self) -> None:
+        self._client.close()
