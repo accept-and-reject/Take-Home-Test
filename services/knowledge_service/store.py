@@ -388,6 +388,19 @@ class KnowledgeApplicationDataStore:
         row["evidence_chunk_ids"] = [item["chunk_id"] for item in evidence]
         return ActionItem.model_validate(row)
 
+    def list_action_items(self) -> list[ActionItem]:
+        rows = self.database.fetch_all(
+            "SELECT action_item_id FROM action_items ORDER BY action_item_id"
+        )
+        items = [
+            self.get_action_item(UUID(row["action_item_id"])) for row in rows
+        ]
+        return [item for item in items if item is not None]
+
+    def count_action_items(self) -> int:
+        row = self.database.fetch_one("SELECT COUNT(*) AS count FROM action_items")
+        return int(row["count"]) if row else 0
+
     def save_search_request(self, request: SearchRequest) -> None:
         data = _payload(request)
         self.database.execute(

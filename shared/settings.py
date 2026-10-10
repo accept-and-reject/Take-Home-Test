@@ -55,6 +55,8 @@ class KnowledgeSettings(ServiceSettings):
     browser_executor_base_url: HttpUrl
     browser_executor_token: str
     browser_request_timeout_seconds: int = Field(ge=1)
+    company_name: str
+    allowed_domain: str
 
     @classmethod
     def from_env(cls) -> "KnowledgeSettings":
@@ -74,6 +76,8 @@ class KnowledgeSettings(ServiceSettings):
             browser_request_timeout_seconds=_positive_int(
                 "BROWSER_REQUEST_TIMEOUT_SECONDS", 180
             ),
+            company_name=_required("COMPANY_NAME"),
+            allowed_domain=_required("ALLOWED_DOMAIN"),
         )
 
 

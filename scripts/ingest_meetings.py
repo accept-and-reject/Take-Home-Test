@@ -47,6 +47,9 @@ def main() -> int:
             vector_store=vector_store,
             openai_gateway=OpenAIGateway(settings.openai_api_key),
             embedding_model=settings.embedding_model,
+            agent_model=settings.agent_model,
+            company_name=settings.company_name,
+            allowed_domain=settings.allowed_domain,
         )
         summary = pipeline.ingest(arguments.input)
         print(json.dumps(summary.to_dict(), ensure_ascii=False, indent=2))
