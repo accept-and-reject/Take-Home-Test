@@ -108,6 +108,90 @@ class BrowserRunStore:
     def is_healthy(self) -> bool:
         return self.database.is_healthy()
 
+    def save_task_submission(
+        self,
+        task: BrowserTask,
+        request: ExecutionRequest,
+        run: BrowserRun | None,
+    ) -> None:
+        """Atomically preserve validation and the optional pending run."""
+
+        task_data = _payload(task)
+        request_data = _payload(request)
+        run_data = _payload(run) if run is not None else None
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO browser_tasks (
+                    browser_task_id, task_source, source_action_item_id,
+                    target_company, start_url, allowed_domain,
+                    requested_topics, max_pages, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(browser_task_id) DO UPDATE SET
+                    task_source=excluded.task_source,
+                    source_action_item_id=excluded.source_action_item_id,
+                    target_company=excluded.target_company,
+                    start_url=excluded.start_url,
+                    allowed_domain=excluded.allowed_domain,
+                    requested_topics=excluded.requested_topics,
+                    max_pages=excluded.max_pages,
+                    created_at=excluded.created_at
+                """,
+                (
+                    task_data["browser_task_id"], task_data["task_source"],
+                    task_data["source_action_item_id"],
+                    task_data["target_company"], task_data["start_url"],
+                    task_data["allowed_domain"],
+                    json.dumps(task_data["requested_topics"]),
+                    task_data["max_pages"], task_data["created_at"],
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO execution_requests (
+                    execution_request_id, browser_task_id, user_instruction,
+                    validation_status, rejection_reason, requested_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(execution_request_id) DO UPDATE SET
+                    browser_task_id=excluded.browser_task_id,
+                    user_instruction=excluded.user_instruction,
+                    validation_status=excluded.validation_status,
+                    rejection_reason=excluded.rejection_reason,
+                    requested_at=excluded.requested_at
+                """,
+                (
+                    request_data["execution_request_id"],
+                    request_data["browser_task_id"],
+                    request_data["user_instruction"],
+                    request_data["validation_status"],
+                    request_data["rejection_reason"],
+                    request_data["requested_at"],
+                ),
+            )
+            if run_data is not None:
+                connection.execute(
+                    """
+                    INSERT INTO browser_runs (
+                        run_id, execution_request_id, status,
+                        visited_page_count, error_summary, started_at,
+                        completed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(run_id) DO UPDATE SET
+                        execution_request_id=excluded.execution_request_id,
+                        status=excluded.status,
+                        visited_page_count=excluded.visited_page_count,
+                        error_summary=excluded.error_summary,
+                        started_at=excluded.started_at,
+                        completed_at=excluded.completed_at
+                    """,
+                    (
+                        run_data["run_id"], run_data["execution_request_id"],
+                        run_data["status"], run_data["visited_page_count"],
+                        run_data["error_summary"], run_data["started_at"],
+                        run_data["completed_at"],
+                    ),
+                )
+
     def save_browser_task(self, task: BrowserTask) -> None:
         data = _payload(task)
         self.database.execute(
@@ -207,6 +291,22 @@ class BrowserRunStore:
             "SELECT * FROM browser_runs WHERE run_id = ?", (str(run_id),)
         )
         return BrowserRun.model_validate(row) if row else None
+
+    def get_browser_run_by_execution_request(
+        self,
+        execution_request_id: UUID,
+    ) -> BrowserRun | None:
+        row = self.database.fetch_one(
+            """
+            SELECT * FROM browser_runs WHERE execution_request_id = ?
+            """,
+            (str(execution_request_id),),
+        )
+        return BrowserRun.model_validate(row) if row else None
+
+    def count_browser_runs(self) -> int:
+        row = self.database.fetch_one("SELECT COUNT(*) AS count FROM browser_runs")
+        return int(row["count"]) if row else 0
 
     def save_action_log(self, log: BrowserActionLog) -> None:
         data = _payload(log)
