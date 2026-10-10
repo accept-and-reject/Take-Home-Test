@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence, TypeVar
 from uuid import UUID
@@ -22,6 +23,12 @@ from shared.sqlite_store import SQLiteStore
 
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
+
+
+@dataclass(frozen=True)
+class VectorSearchHit:
+    chunk_id: UUID
+    score: float
 
 
 KNOWLEDGE_SCHEMA = (
@@ -509,6 +516,27 @@ class VectorKnowledgeStore:
             exact=True,
         )
         return result.count
+
+    def search_chunks(
+        self,
+        query_vector: Sequence[float],
+        *,
+        limit: int,
+    ) -> list[VectorSearchHit]:
+        if not self._client.collection_exists(self.COLLECTION_NAME):
+            return []
+        result = self._client.query_points(
+            collection_name=self.COLLECTION_NAME,
+            query=list(query_vector),
+            search_params=models.SearchParams(exact=True),
+            with_payload=False,
+            with_vectors=False,
+            limit=limit,
+        )
+        return [
+            VectorSearchHit(chunk_id=UUID(str(point.id)), score=float(point.score))
+            for point in result.points
+        ]
 
     def close(self) -> None:
         self._client.close()
