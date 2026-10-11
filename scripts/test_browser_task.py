@@ -1,4 +1,4 @@
-"""Manually verify Browser Task authentication, validation, and persistence."""
+"""Manually verify scoped Browser execution, persistence, and rejection."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 import secrets
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import httpx2
@@ -15,9 +16,13 @@ from services.browser_service.store import BrowserRunStore
 from shared.settings import BrowserSettings
 
 
+FINAL_RUN_STATUSES = {"completed", "partial"}
+EXPECTED_TOPICS = {"company_overview", "products", "benefits"}
+
+
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Verify Browser Task acceptance without launching Chromium."
+        description="Verify independent official-site Browser Task execution."
     )
     parser.add_argument(
         "--url",
@@ -30,13 +35,12 @@ def _arguments() -> argparse.Namespace:
 def _task(
     settings: BrowserSettings,
     *,
-    source: str,
-    action_item_id: str | None = None,
+    max_pages: int,
 ) -> dict[str, Any]:
     return {
         "browser_task_id": str(uuid4()),
-        "task_source": source,
-        "source_action_item_id": action_item_id,
+        "task_source": "direct",
+        "source_action_item_id": None,
         "target_company": settings.company_name,
         "start_url": str(settings.start_url),
         "allowed_domain": settings.allowed_domain,
@@ -45,7 +49,7 @@ def _task(
             "products",
             "benefits",
         ],
-        "max_pages": min(settings.max_pages, 5),
+        "max_pages": max_pages,
         "created_at": datetime.now(UTC).isoformat(),
     }
 
@@ -67,16 +71,110 @@ def _submit(
     )
 
 
-def _result(
-    client: httpx2.Client,
-    url: str,
-    token: str,
-    execution_request_id: str,
-) -> httpx2.Response:
-    return client.get(
-        f"{url}/browser-tasks/{execution_request_id}",
-        headers={"Authorization": f"Bearer {token}"},
+def _result_is_traceable(
+    payload: dict[str, Any],
+    *,
+    allowed_domain: str,
+    max_pages: int,
+    require_budget_stop: bool = False,
+    required_found_topics: set[str] | None = None,
+) -> bool:
+    run = payload.get("browser_run") or {}
+    findings = payload.get("findings") or []
+    logs = payload.get("action_logs") or []
+    topics = {finding.get("topic") for finding in findings}
+    sequences = [log.get("sequence") for log in logs]
+    visited_urls = [
+        log.get("target_url")
+        for log in logs
+        if log.get("action_type") == "open" and log.get("target_url")
+    ]
+    source_urls = [
+        source_url
+        for finding in findings
+        for source_url in finding.get("source_urls", [])
+    ]
+    action_types = {log.get("action_type") for log in logs}
+    accepted_capture_evidence = _accepted_capture_evidence(logs)
+    found_topics = {
+        finding.get("topic")
+        for finding in findings
+        if finding.get("status") == "found"
+    }
+    all_topics_found = all(
+        finding.get("status") == "found" for finding in findings
     )
+    budget_stop_recorded = any(
+        log.get("action_type") == "skip"
+        and log.get("detail") == "page budget reached"
+        for log in logs
+    )
+    return all(
+        (
+            run.get("status") in FINAL_RUN_STATUSES,
+            run.get("visited_page_count", max_pages + 1) <= max_pages,
+            topics == EXPECTED_TOPICS,
+            len(findings) == len(EXPECTED_TOPICS),
+            run.get("visited_page_count") == len(visited_urls),
+            sequences == list(range(1, len(sequences) + 1)),
+            bool(logs) and logs[-1].get("action_type") == "finish",
+            {"open", "inspect", "capture", "finish"}.issubset(action_types),
+            all(_host_allowed(url, allowed_domain) for url in visited_urls),
+            all(_host_allowed(url, allowed_domain) for url in source_urls),
+            all(
+                finding.get("status") != "found"
+                or (
+                    finding.get("topic") in accepted_capture_evidence
+                    and finding.get("evidence_quote")
+                    == accepted_capture_evidence[finding.get("topic")][0]
+                    and finding.get("evidence_reason")
+                    == accepted_capture_evidence[finding.get("topic")][1]
+                )
+                for finding in findings
+            ),
+            (required_found_topics or set()).issubset(found_topics),
+            not require_budget_stop
+            or all_topics_found
+            or budget_stop_recorded,
+        )
+    )
+
+
+def _accepted_capture_evidence(
+    logs: list[dict[str, Any]],
+) -> dict[str, tuple[str, str]]:
+    accepted: dict[str, tuple[str, str]] = {}
+    for log in logs:
+        if (
+            log.get("action_type") != "capture"
+            or log.get("status") != "success"
+            or not log.get("detail")
+        ):
+            continue
+        try:
+            detail = json.loads(log["detail"])
+            topic = str(detail["topic"])
+            evidence_quote = str(detail["evidence_quote"])
+            evidence_reason = str(detail["evidence_reason"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if (
+            topic in EXPECTED_TOPICS
+            and evidence_quote.strip()
+            and evidence_reason.strip()
+        ):
+            accepted[topic] = (evidence_quote, evidence_reason)
+    return accepted
+
+
+def _host_allowed(url: str, allowed_domain: str) -> bool:
+    host = (urlsplit(url).hostname or "").rstrip(".").casefold()
+    expected = allowed_domain.strip().rstrip(".").casefold()
+    if host.startswith("www."):
+        host = host[4:]
+    if expected.startswith("www."):
+        expected = expected[4:]
+    return host == expected or host.endswith("." + expected)
 
 
 def main() -> int:
@@ -89,43 +187,55 @@ def main() -> int:
     if secrets.compare_digest(wrong_token, settings.demo_api_token):
         wrong_token += "-wrong"
 
+    today_utc = datetime.now(UTC).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    started_today = store.count_started_browser_runs_since(today_utc)
+    remaining_today = settings.max_daily_browser_runs - started_today
+    if remaining_today < 2:
+        print(
+            json.dumps(
+                {
+                    "status": "failed",
+                    "reason": "two daily Browser Run slots are required",
+                    "started_today": started_today,
+                    "max_daily_browser_runs": settings.max_daily_browser_runs,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 1
+
     initial_run_count = store.count_browser_runs()
-    with httpx2.Client(timeout=30.0) as client:
+    timeout = httpx2.Timeout(30.0, read=300.0)
+    with httpx2.Client(timeout=timeout) as client:
         health = client.get(f"{base_url}/health")
         run_count_after_health = store.count_browser_runs()
 
-        direct_task = _task(settings, source="direct")
-        direct = _submit(
-            client,
-            base_url,
-            settings.demo_api_token,
-            direct_task,
-        )
-        direct_payload = direct.json()
-        direct_request = direct_payload.get("execution_request") or {}
-        direct_result = _result(
-            client,
-            base_url,
-            settings.demo_api_token,
-            direct_request.get(
-                "execution_request_id",
-                "00000000-0000-0000-0000-000000000000",
-            ),
-        )
-
-        service_task = _task(
+        full_task = _task(
             settings,
-            source="action_item",
-            action_item_id=str(uuid4()),
+            max_pages=min(settings.max_pages, 5),
         )
-        service = _submit(
+        full_run = _submit(
             client,
             base_url,
-            settings.browser_executor_token,
-            service_task,
+            settings.demo_api_token,
+            full_task,
         )
 
-        external_task = _task(settings, source="direct")
+        one_page_task = _task(settings, max_pages=1)
+        one_page_run = _submit(
+            client,
+            base_url,
+            settings.demo_api_token,
+            one_page_task,
+        )
+
+        external_task = _task(settings, max_pages=5)
         external_task["start_url"] = "https://example.com/"
         external_task["allowed_domain"] = "example.com"
         external = _submit(
@@ -134,21 +244,8 @@ def main() -> int:
             settings.demo_api_token,
             external_task,
         )
-        external_payload = external.json()
-        external_request = external_payload.get("execution_request") or {}
-        external_request_id = external_request.get("execution_request_id")
-        external_result = (
-            _result(
-                client,
-                base_url,
-                settings.demo_api_token,
-                external_request_id,
-            )
-            if external_request_id
-            else None
-        )
 
-        missing_field_task = _task(settings, source="direct")
+        missing_field_task = _task(settings, max_pages=5)
         missing_field_task.pop("target_company")
         missing_field = _submit(
             client,
@@ -157,7 +254,7 @@ def main() -> int:
             missing_field_task,
         )
 
-        unknown_topic_task = _task(settings, source="direct")
+        unknown_topic_task = _task(settings, max_pages=5)
         unknown_topic_task["requested_topics"] = ["unknown_topic"]
         unknown_topic = _submit(
             client,
@@ -166,8 +263,7 @@ def main() -> int:
             unknown_topic_task,
         )
 
-        too_many_pages_task = _task(settings, source="direct")
-        too_many_pages_task["max_pages"] = 6
+        too_many_pages_task = _task(settings, max_pages=6)
         too_many_pages = _submit(
             client,
             base_url,
@@ -175,33 +271,36 @@ def main() -> int:
             too_many_pages_task,
         )
 
-        missing_token = _submit(client, base_url, None, direct_task)
-        invalid_token = _submit(client, base_url, wrong_token, direct_task)
-    final_run_count = store.count_browser_runs()
+        missing_token = _submit(client, base_url, None, full_task)
+        invalid_token = _submit(client, base_url, wrong_token, full_task)
 
+    final_run_count = store.count_browser_runs()
     health_payload = health.json()
-    direct_result_payload = direct_result.json()
-    direct_run = direct_result_payload.get("browser_run") or {}
-    service_payload = service.json()
-    external_result_payload = external_result.json() if external_result else {}
+    full_payload = full_run.json()
+    one_page_payload = one_page_run.json()
+    external_payload = external.json()
     passed = all(
         (
             health.status_code == 200,
             health_payload.get("checks", {}).get("browser_runtime") == "ready",
             run_count_after_health == initial_run_count,
-            direct.status_code == 202,
-            direct_payload.get("status") == "pending",
-            direct_result.status_code == 200,
-            direct_run.get("status") == "pending",
-            direct_result_payload.get("action_logs") == [],
-            direct_result_payload.get("findings") == [],
-            service.status_code == 202,
-            service_payload.get("status") == "pending",
+            full_run.status_code == 200,
+            _result_is_traceable(
+                full_payload,
+                allowed_domain=settings.allowed_domain,
+                max_pages=min(settings.max_pages, 5),
+                required_found_topics={"company_overview", "products"},
+            ),
+            one_page_run.status_code == 200,
+            _result_is_traceable(
+                one_page_payload,
+                allowed_domain=settings.allowed_domain,
+                max_pages=1,
+                require_budget_stop=True,
+            ),
             external.status_code == 422,
             external_payload.get("status") == "rejected",
             external_payload.get("browser_run") is None,
-            external_result is not None,
-            external_result_payload.get("browser_run") is None,
             missing_field.status_code == 422,
             unknown_topic.status_code == 422,
             too_many_pages.status_code == 422,
@@ -215,31 +314,32 @@ def main() -> int:
             {
                 "status": "passed" if passed else "failed",
                 "health": health_payload,
-                "direct_task": direct_payload,
-                "service_task": service_payload,
-                "external_domain": external_payload,
-                "schema_rejections": {
+                "full_browser_run": full_payload,
+                "one_page_browser_run": one_page_payload,
+                "rejections": {
+                    "external_domain": external_payload,
                     "missing_field": missing_field.json(),
                     "unknown_topic": unknown_topic.json(),
                     "too_many_pages": too_many_pages.json(),
                 },
-                "authentication": {
-                    "missing_token_status": missing_token.status_code,
-                    "invalid_token_status": invalid_token.status_code,
-                },
                 "http_statuses": {
-                    "health": health.status_code,
-                    "direct_task": direct.status_code,
-                    "service_task": service.status_code,
+                    "full_browser_run": full_run.status_code,
+                    "one_page_browser_run": one_page_run.status_code,
                     "external_domain": external.status_code,
                     "missing_field": missing_field.status_code,
                     "unknown_topic": unknown_topic.status_code,
                     "too_many_pages": too_many_pages.status_code,
+                    "missing_token": missing_token.status_code,
+                    "invalid_token": invalid_token.status_code,
                 },
                 "browser_run_counts": {
                     "before_health": initial_run_count,
                     "after_health": run_count_after_health,
                     "after_submissions": final_run_count,
+                },
+                "daily_run_limit": {
+                    "started_before_test": started_today,
+                    "maximum": settings.max_daily_browser_runs,
                 },
             },
             ensure_ascii=False,

@@ -47,6 +47,8 @@ def accept_browser_task(
     caller: CallerKind,
     settings: BrowserSettings,
     store: BrowserRunStore,
+    *,
+    execution_policy_reason: str | None = None,
 ) -> tuple[int, dict[str, Any]]:
     schema_result = validate_task_schema(payload)
     if not schema_result.accepted or schema_result.task is None:
@@ -65,6 +67,9 @@ def accept_browser_task(
         reasons.append("demo credentials may only submit direct tasks")
     if caller == "service" and task.task_source is not BrowserTaskSource.ACTION_ITEM:
         reasons.append("service credentials require an action_item task")
+    has_validation_rejection = bool(reasons)
+    if execution_policy_reason is not None:
+        reasons.append(execution_policy_reason)
 
     now = datetime.now(UTC)
     execution_request = ExecutionRequest(
@@ -91,8 +96,14 @@ def accept_browser_task(
             completed_at=None,
         )
     store.save_task_submission(task, execution_request, browser_run)
+    if has_validation_rejection:
+        status_code = 422
+    elif execution_policy_reason is not None:
+        status_code = 429
+    else:
+        status_code = 202
     return (
-        422 if reasons else 202,
+        status_code,
         return_browser_task_result(
             execution_request.execution_request_id,
             store,

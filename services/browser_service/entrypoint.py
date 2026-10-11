@@ -1,7 +1,9 @@
-"""Authenticated Browser Task API without automatic browser execution."""
+"""Authenticated API for validating, executing, and returning Browser Tasks."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from threading import BoundedSemaphore
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -20,12 +22,14 @@ from services.browser_service.browser_task_gateway.browser_task_interface_role i
     return_browser_task_result,
 )
 from services.browser_service.store import BrowserRunStore
+from services.browser_service.workflow import execute_browser_task
 from shared.settings import BrowserSettings
 
 
 SETTINGS = BrowserSettings.from_env()
 STORE = BrowserRunStore(SETTINGS.data_dir)
 STORE.initialize()
+RUN_SLOTS = BoundedSemaphore(SETTINGS.max_concurrent_browser_runs)
 
 app = FastAPI(title="Browser Executor Service", version="0.1.0")
 
@@ -76,14 +80,45 @@ def submit_browser_task(
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     caller = _authenticated_caller(authorization)
-    status_code, content = accept_browser_task(
-        submission.browser_task,
-        submission.user_instruction,
-        caller,
-        SETTINGS,
-        STORE,
-    )
-    return JSONResponse(status_code=status_code, content=content)
+    slot_acquired = RUN_SLOTS.acquire(blocking=False)
+    try:
+        execution_policy_reason = None
+        if not slot_acquired:
+            execution_policy_reason = "maximum concurrent browser runs reached"
+        else:
+            today_utc = datetime.now(UTC).replace(
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+            if (
+                STORE.count_started_browser_runs_since(today_utc)
+                >= SETTINGS.max_daily_browser_runs
+            ):
+                execution_policy_reason = "daily browser run limit reached"
+        status_code, content = accept_browser_task(
+            submission.browser_task,
+            submission.user_instruction,
+            caller,
+            SETTINGS,
+            STORE,
+            execution_policy_reason=execution_policy_reason,
+        )
+        if status_code == 202:
+            browser_run = content.get("browser_run") or {}
+            run_id = UUID(browser_run["run_id"])
+            execute_browser_task(run_id, SETTINGS, STORE)
+            execution_request = content.get("execution_request") or {}
+            content = return_browser_task_result(
+                UUID(execution_request["execution_request_id"]),
+                STORE,
+            )
+            status_code = 200
+        return JSONResponse(status_code=status_code, content=content)
+    finally:
+        if slot_acquired:
+            RUN_SLOTS.release()
 
 
 @app.get("/browser-tasks/{execution_request_id}")

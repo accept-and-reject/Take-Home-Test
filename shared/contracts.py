@@ -276,14 +276,25 @@ class ResearchFinding(ContractModel):
     topic: ResearchTopic
     status: FindingStatus
     summary: str | None = None
+    evidence_quote: str | None = None
+    evidence_reason: str | None = None
     source_urls: list[HttpUrl]
     message: str | None = None
 
     @model_validator(mode="after")
     def validate_finding_payload(self) -> "ResearchFinding":
         if self.status is FindingStatus.FOUND:
-            if not self.summary or not self.source_urls:
-                raise ValueError("found findings require summary and source_urls")
-        elif self.source_urls:
-            raise ValueError("not_found or failed findings must not include source_urls")
+            if (
+                not self.summary
+                or not self.evidence_quote
+                or not self.evidence_reason
+                or not self.source_urls
+            ):
+                raise ValueError(
+                    "found findings require summary, evidence, and source_urls"
+                )
+        elif self.source_urls or self.evidence_quote or self.evidence_reason:
+            raise ValueError(
+                "not_found or failed findings must not include evidence or source_urls"
+            )
         return self

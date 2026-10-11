@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -79,6 +80,8 @@ BROWSER_SCHEMA = (
         topic TEXT NOT NULL,
         status TEXT NOT NULL,
         summary TEXT,
+        evidence_quote TEXT,
+        evidence_reason TEXT,
         source_urls TEXT NOT NULL,
         message TEXT,
         FOREIGN KEY (run_id) REFERENCES browser_runs(run_id) ON DELETE CASCADE,
@@ -104,6 +107,23 @@ class BrowserRunStore:
 
     def initialize(self) -> None:
         self.database.initialize(BROWSER_SCHEMA)
+        with self.database.connect() as connection:
+            columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(research_findings)"
+                ).fetchall()
+            }
+            if "evidence_quote" not in columns:
+                connection.execute(
+                    "ALTER TABLE research_findings "
+                    "ADD COLUMN evidence_quote TEXT"
+                )
+            if "evidence_reason" not in columns:
+                connection.execute(
+                    "ALTER TABLE research_findings "
+                    "ADD COLUMN evidence_reason TEXT"
+                )
 
     def is_healthy(self) -> bool:
         return self.database.is_healthy()
@@ -308,6 +328,26 @@ class BrowserRunStore:
         row = self.database.fetch_one("SELECT COUNT(*) AS count FROM browser_runs")
         return int(row["count"]) if row else 0
 
+    def count_started_browser_runs_since(self, since: datetime) -> int:
+        row = self.database.fetch_one(
+            """
+            SELECT COUNT(*) AS count FROM browser_runs
+            WHERE started_at >= ?
+            """,
+            (since.isoformat(),),
+        )
+        return int(row["count"]) if row else 0
+
+    def next_action_sequence(self, run_id: UUID) -> int:
+        row = self.database.fetch_one(
+            """
+            SELECT COALESCE(MAX(sequence), 0) + 1 AS next_sequence
+            FROM browser_action_logs WHERE run_id = ?
+            """,
+            (str(run_id),),
+        )
+        return int(row["next_sequence"]) if row else 1
+
     def save_action_log(self, log: BrowserActionLog) -> None:
         data = _payload(log)
         self.database.execute(
@@ -348,20 +388,24 @@ class BrowserRunStore:
         self.database.execute(
             """
             INSERT INTO research_findings (
-                finding_id, run_id, topic, status, summary, source_urls, message
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                finding_id, run_id, topic, status, summary, evidence_quote,
+                evidence_reason, source_urls, message
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(finding_id) DO UPDATE SET
                 run_id=excluded.run_id,
                 topic=excluded.topic,
                 status=excluded.status,
                 summary=excluded.summary,
+                evidence_quote=excluded.evidence_quote,
+                evidence_reason=excluded.evidence_reason,
                 source_urls=excluded.source_urls,
                 message=excluded.message
             """,
             (
                 data["finding_id"], data["run_id"], data["topic"],
-                data["status"], data["summary"],
-                json.dumps(data["source_urls"]), data["message"],
+                data["status"], data["summary"], data["evidence_quote"],
+                data["evidence_reason"], json.dumps(data["source_urls"]),
+                data["message"],
             ),
         )
 
