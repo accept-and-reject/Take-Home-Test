@@ -133,10 +133,88 @@ def _result_is_traceable(
                 for finding in findings
             ),
             (required_found_topics or set()).issubset(found_topics),
+            _navigation_stop_is_consistent(
+                payload,
+                max_pages=max_pages,
+            ),
             not require_budget_stop
             or all_topics_found
             or budget_stop_recorded,
         )
+    )
+
+
+def _navigation_stop_is_consistent(
+    payload: dict[str, Any],
+    *,
+    max_pages: int,
+) -> bool:
+    run = payload.get("browser_run") or {}
+    findings = payload.get("findings") or []
+    logs = payload.get("action_logs") or []
+    all_topics_found = all(
+        finding.get("status") == "found" for finding in findings
+    )
+    if any(
+        log.get("reason") == "no useful unvisited internal link was selected"
+        for log in logs
+    ):
+        return False
+
+    retry_sequences = [
+        log.get("sequence")
+        for log in logs
+        if log.get("reason")
+        == "agent selected no link while allowed candidates remained"
+    ]
+    follow_sequences = [
+        log.get("sequence")
+        for log in logs
+        if log.get("action_type") == "follow_link"
+        and log.get("status") == "success"
+    ]
+    if not all_topics_found and any(
+        not any(
+            isinstance(follow_sequence, int)
+            and isinstance(retry_sequence, int)
+            and follow_sequence > retry_sequence
+            for follow_sequence in follow_sequences
+        )
+        for retry_sequence in retry_sequences
+    ):
+        return False
+
+    unresolved = [
+        finding
+        for finding in findings
+        if finding.get("status") != "found"
+    ]
+    if not unresolved:
+        return True
+
+    visited_page_count = run.get("visited_page_count")
+    if visited_page_count == max_pages:
+        stopped_for_budget = any(
+            log.get("action_type") == "skip"
+            and log.get("reason")
+            == "page budget stopped additional navigation"
+            and log.get("detail") == "page budget reached"
+            for log in logs
+        )
+        return stopped_for_budget and all(
+            "page budget was reached" in str(finding.get("message"))
+            for finding in unresolved
+        )
+
+    stopped_for_exhaustion = any(
+        log.get("action_type") == "skip"
+        and log.get("reason")
+        == "allowed internal link candidates were exhausted"
+        for log in logs
+    )
+    return stopped_for_exhaustion and all(
+        "allowed internal links were exhausted" in str(finding.get("message"))
+        for finding in unresolved
     )
 
 
