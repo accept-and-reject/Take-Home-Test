@@ -7,6 +7,11 @@ from uuid import UUID
 
 from mcp.server import MCPServer
 
+from services.knowledge_service.knowledge_mcp.integrated_execution_role import (
+    ActionItemExecutionRejected,
+    build_task_from_action_item,
+    call_browser_executor,
+)
 from services.knowledge_service.meeting_query.meeting_search_role import (
     parse_search_scope,
     search_action_items,
@@ -34,7 +39,9 @@ def create_knowledge_mcp_server(
             "Search only the indexed meeting knowledge. Present source titles and "
             "locators with factual claims. If status is insufficient_evidence, "
             "state that the documents do not contain enough evidence. Never infer "
-            "missing facts and never imply that a Browser Task was executed."
+            "missing facts. Use execute_action_item only after the user explicitly "
+            "asks to execute a selected ActionItem; never imply that a Browser Task "
+            "was executed unless that tool returns a Browser Run result."
         ),
     )
 
@@ -100,6 +107,37 @@ def create_knowledge_mcp_server(
             "status": "found",
             "action_item": _action_item_summary(item, store),
         }
+
+    @server.tool()
+    def execute_action_item(action_item_id: UUID) -> dict[str, object]:
+        """Execute one explicitly selected company-research ActionItem.
+
+        This tool starts a bounded Browser workflow and can consume external API
+        quota. Call it only after the user explicitly asks to execute the selected
+        ActionItem. Use get_action_item for read-only inspection.
+        """
+
+        try:
+            context = build_task_from_action_item(
+                action_item_id,
+                settings,
+                store,
+            )
+        except ActionItemExecutionRejected as exc:
+            return {
+                "status": "rejected",
+                "action_item_id": str(action_item_id),
+                "error": {
+                    "code": exc.code,
+                    "message": exc.message,
+                },
+            }
+        result = call_browser_executor(context, settings)
+        result["action_item"] = _action_item_summary(
+            context.action_item,
+            store,
+        )
+        return result
 
     return server
 

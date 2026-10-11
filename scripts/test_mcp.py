@@ -36,8 +36,9 @@ async def _connect(url: str, token: str) -> tuple[list[str], dict[str, Any]]:
                 "search_meetings",
                 {
                     "query": (
-                        "請整理 Display Driver 專案最近兩週的討論、"
-                        "決策與未完成事項，並列出可核對來源。"
+                        "請整理 Display Driver 專案在 2026-09-18 至 "
+                        "2026-09-25 的討論、決策與未完成事項，"
+                        "並列出可核對來源。"
                     )
                 },
             )
@@ -118,7 +119,11 @@ async def _main() -> int:
     tool_names, tool_results = await _connect(arguments.url, arguments.token)
     http_checks = await _http_checks(arguments.url, arguments.token)
 
-    expected_tools = ["get_action_item", "search_meetings"]
+    expected_tools = [
+        "execute_action_item",
+        "get_action_item",
+        "search_meetings",
+    ]
     passed = (
         tool_names == expected_tools
         and tool_results["search"].get("status") == "completed"

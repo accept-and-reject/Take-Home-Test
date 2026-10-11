@@ -56,6 +56,7 @@ class KnowledgeSettings(ServiceSettings):
     browser_executor_token: str
     browser_request_timeout_seconds: int = Field(ge=1)
     company_name: str
+    start_url: HttpUrl
     allowed_domain: str
 
     @classmethod
@@ -77,6 +78,7 @@ class KnowledgeSettings(ServiceSettings):
                 "BROWSER_REQUEST_TIMEOUT_SECONDS", 180
             ),
             company_name=_required("COMPANY_NAME"),
+            start_url=_required("START_URL"),
             allowed_domain=_required("ALLOWED_DOMAIN"),
         )
 
