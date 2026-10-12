@@ -120,9 +120,7 @@ check_required_env() {
   for key in \
     OPENAI_API_KEY \
     MCP_BEARER_TOKEN \
-    BROWSER_API_TOKEN \
-    START_URL \
-    ALLOWED_DOMAIN
+    BROWSER_API_TOKEN
   do
     value="$(env_value "${key}")"
     [[ -n "${value}" ]] || fail ".env 缺少有效的 ${key}"
@@ -135,7 +133,7 @@ check_required_env() {
 }
 
 check_fixed_runtime_configuration() {
-  if grep -Eq 'COMPANY_NAME|BROWSER_EXECUTOR_TOKEN|DEMO_API_TOKEN' \
+  if grep -Eq 'COMPANY_NAME|START_URL|ALLOWED_DOMAIN|BROWSER_EXECUTOR_TOKEN|DEMO_API_TOKEN' \
     .env .env.example compose.yaml
   then
     return 1
@@ -217,9 +215,9 @@ use_knowledge_only() {
     wait_for_service_health knowledge-mcp-service
   run_check \
     "runtime-isolation/knowledge-only/fixed-runtime-configuration" \
-    "Knowledge Service 使用固定公司、單一 Browser Token 與 Development 設定" \
+    "Knowledge Service 使用固定公司與官網、單一 Browser Token 及 Development 設定" \
     compose exec -T knowledge-mcp-service \
-    sh -c 'test "$APP_ENV" = development && test "$LOG_LEVEL" = DEBUG && test -z "${COMPANY_NAME+x}" && test -n "$BROWSER_API_TOKEN" && test -z "${BROWSER_EXECUTOR_TOKEN+x}" && test -z "${DEMO_API_TOKEN+x}"'
+    sh -c 'test "$APP_ENV" = development && test "$LOG_LEVEL" = DEBUG && test -z "${COMPANY_NAME+x}" && test -z "${START_URL+x}" && test -z "${ALLOWED_DOMAIN+x}" && test -n "$BROWSER_API_TOKEN" && test -z "${BROWSER_EXECUTOR_TOKEN+x}" && test -z "${DEMO_API_TOKEN+x}" && python -c "from shared.settings import KnowledgeSettings, SUPPORTED_ALLOWED_DOMAIN, SUPPORTED_START_URL; settings = KnowledgeSettings.from_env(); assert str(settings.start_url).rstrip(chr(47)) == SUPPORTED_START_URL.rstrip(chr(47)); assert settings.allowed_domain == SUPPORTED_ALLOWED_DOMAIN"'
   run_check \
     "runtime-isolation/knowledge-only/production-safe-defaults" \
     "未覆寫時使用 Production 與 INFO 安全預設" \
@@ -294,9 +292,9 @@ use_browser_only() {
     wait_for_service_health browser-executor-service
   run_check \
     "runtime-isolation/browser-only/fixed-runtime-configuration" \
-    "Browser Service 使用固定公司、單一 Browser Token 與 Development 設定" \
+    "Browser Service 使用固定公司與官網、單一 Browser Token 及 Development 設定" \
     compose exec -T browser-executor-service \
-    sh -c 'test "$APP_ENV" = development && test "$LOG_LEVEL" = DEBUG && test -z "${COMPANY_NAME+x}" && test -n "$BROWSER_API_TOKEN" && test -z "${BROWSER_EXECUTOR_TOKEN+x}" && test -z "${DEMO_API_TOKEN+x}"'
+    sh -c 'test "$APP_ENV" = development && test "$LOG_LEVEL" = DEBUG && test -z "${COMPANY_NAME+x}" && test -z "${START_URL+x}" && test -z "${ALLOWED_DOMAIN+x}" && test -n "$BROWSER_API_TOKEN" && test -z "${BROWSER_EXECUTOR_TOKEN+x}" && test -z "${DEMO_API_TOKEN+x}" && python -c "from shared.settings import BrowserSettings, SUPPORTED_ALLOWED_DOMAIN, SUPPORTED_START_URL; settings = BrowserSettings.from_env(); assert str(settings.start_url).rstrip(chr(47)) == SUPPORTED_START_URL.rstrip(chr(47)); assert settings.allowed_domain == SUPPORTED_ALLOWED_DOMAIN"'
 }
 
 prepare_knowledge_flows() {

@@ -282,8 +282,6 @@ def _run_browser_client_scenario(
         scenario,
         browser_base_url=browser_url,
         browser_token=_required_env("BROWSER_API_TOKEN"),
-        start_url=_required_env("START_URL"),
-        allowed_domain=_required_env("ALLOWED_DOMAIN"),
         timeout_seconds=int(
             os.getenv("BROWSER_REQUEST_TIMEOUT_SECONDS", "180")
         ),

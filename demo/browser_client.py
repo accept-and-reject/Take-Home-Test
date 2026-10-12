@@ -16,7 +16,11 @@ from typing import Any
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from shared.settings import SUPPORTED_COMPANY_NAME
+from shared.settings import (
+    SUPPORTED_ALLOWED_DOMAIN,
+    SUPPORTED_COMPANY_NAME,
+    SUPPORTED_START_URL,
+)
 
 
 TOPIC_LABELS = {
@@ -41,18 +45,16 @@ def run_browser_scenario(
     *,
     browser_base_url: str,
     browser_token: str,
-    start_url: str,
-    allowed_domain: str,
     timeout_seconds: int,
 ) -> BrowserDemoResult:
     """Build and execute a direct BrowserTask without Knowledge MCP."""
 
     user_input = str(scenario["input"])
-    requested_url = _requested_url(user_input, start_url)
+    requested_url = _requested_url(user_input, SUPPORTED_START_URL)
     requested_domain = _url_domain(requested_url)
     outside_allowed_scope = _normalized_domain(
         requested_domain
-    ) != _normalized_domain(allowed_domain)
+    ) != _normalized_domain(SUPPORTED_ALLOWED_DOMAIN)
 
     task = {
         "browser_task_id": str(uuid4()),

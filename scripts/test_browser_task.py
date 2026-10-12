@@ -13,7 +13,12 @@ from uuid import uuid4
 import httpx2
 
 from services.browser_service.store import BrowserRunStore
-from shared.settings import BrowserSettings, SUPPORTED_COMPANY_NAME
+from shared.settings import (
+    BrowserSettings,
+    SUPPORTED_ALLOWED_DOMAIN,
+    SUPPORTED_COMPANY_NAME,
+    SUPPORTED_START_URL,
+)
 
 
 FINAL_RUN_STATUSES = {"completed", "partial"}
@@ -411,6 +416,9 @@ def _run_case(
                     external_payload.get("status") == "rejected",
                     external_payload.get("browser_run") is None,
                     settings.company_name == SUPPORTED_COMPANY_NAME,
+                    str(settings.start_url).rstrip("/")
+                    == SUPPORTED_START_URL.rstrip("/"),
+                    settings.allowed_domain == SUPPORTED_ALLOWED_DOMAIN,
                     "target_company" in external_rejection_reason,
                     "start_url" in external_rejection_reason,
                     "allowed_domain" in external_rejection_reason,
@@ -632,6 +640,9 @@ def main() -> int:
             external_payload.get("status") == "rejected",
             external_payload.get("browser_run") is None,
             settings.company_name == SUPPORTED_COMPANY_NAME,
+            str(settings.start_url).rstrip("/")
+            == SUPPORTED_START_URL.rstrip("/"),
+            settings.allowed_domain == SUPPORTED_ALLOWED_DOMAIN,
             "target_company" in external_rejection_reason,
             "start_url" in external_rejection_reason,
             "allowed_domain" in external_rejection_reason,

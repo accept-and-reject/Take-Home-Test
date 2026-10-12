@@ -10,9 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 
 # Design: doc/03_開發規則/01_環境文件.md（環境設計規則）
-# The take-home project intentionally supports one company; deployment cannot
-# broaden that business boundary through an environment variable.
+# The take-home project intentionally supports one company and one official
+# site; deployment cannot broaden that business boundary through environment
+# variables.
 SUPPORTED_COMPANY_NAME: Final = "瑞鼎科技"
+SUPPORTED_START_URL: Final = "https://www.rad-ic.com/zh-TW"
+SUPPORTED_ALLOWED_DOMAIN: Final = "www.rad-ic.com"
 
 
 def _required(name: str) -> str:
@@ -85,8 +88,8 @@ class KnowledgeSettings(ServiceSettings):
                 "BROWSER_REQUEST_TIMEOUT_SECONDS", 180
             ),
             company_name=SUPPORTED_COMPANY_NAME,
-            start_url=_required("START_URL"),
-            allowed_domain=_required("ALLOWED_DOMAIN"),
+            start_url=SUPPORTED_START_URL,
+            allowed_domain=SUPPORTED_ALLOWED_DOMAIN,
         )
 
 
@@ -115,8 +118,8 @@ class BrowserSettings(ServiceSettings):
             agent_reasoning_effort=os.getenv("AGENT_REASONING_EFFORT", "low"),
             browser_api_token=_required("BROWSER_API_TOKEN"),
             company_name=SUPPORTED_COMPANY_NAME,
-            start_url=_required("START_URL"),
-            allowed_domain=_required("ALLOWED_DOMAIN"),
+            start_url=SUPPORTED_START_URL,
+            allowed_domain=SUPPORTED_ALLOWED_DOMAIN,
             max_pages=_positive_int("MAX_PAGES", 5),
             max_daily_browser_runs=_positive_int("MAX_DAILY_BROWSER_RUNS", 20),
             max_concurrent_browser_runs=_positive_int(
