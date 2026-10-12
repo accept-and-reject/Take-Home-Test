@@ -416,21 +416,21 @@ Case 1：跨週查詢專案進度並取得來源
 輸入：
    請整理 Display Driver 專案在 2026-09-18 至 2026-09-25 的討論、決策與未完成事項，並列出可核對的文件來源。
 
-通過條件：Codex 自行選擇 search_meetings；回答涵蓋兩週資料，且關鍵敘述附來源標題與 Locator。
+通過條件：Codex 自行選擇 search_meetings；回答涵蓋兩週資料，且關鍵敘述附來源標題與 Locator。最終回答不顯示 UUID、向量分數、原始 Request 或其他內部診斷欄位，也不直接傾印 Tool JSON。
 自動化結果比對：${RUN_LOG_DIR}/flow-2-knowledge-mcp/case-01.log
 
 Case 2：依 ActionItem ID 取得可執行待辦與證據
 延續 Case 1 的對話，輸入：
    請先顯示公司研究待辦的目前狀態與跨週來源，不要執行它。
 
-通過條件：Codex 使用 get_action_item；顯示瑞鼎科技、允許網域、三個研究主題與跨週證據，而且沒有啟動 Browser Task。
+通過條件：Codex 在內部使用 Case 1 取得的 ActionItem ID 呼叫 get_action_item；最終回答顯示待辦內容、狀態、瑞鼎科技、允許網域、三個研究主題與跨週來源，而且不顯示 ActionItem ID、Chunk ID 或其他內部識別碼，也沒有啟動 Browser Task。
 自動化結果比對：${RUN_LOG_DIR}/flow-2-knowledge-mcp/case-02.log
 
 Case 3：資料不足時不產生無來源答案
 輸入：
    這個專案在火星辦公室的正式啟用日期是什麼？請只根據會議文件回答。
 
-通過條件：Codex 使用 search_meetings，並明確回答文件證據不足，不推測日期。
+通過條件：Codex 使用 search_meetings，並明確回答文件證據不足，不推測日期，也不顯示內部診斷欄位。
 自動化結果比對：${RUN_LOG_DIR}/flow-2-knowledge-mcp/case-03.log
 
 Case 4：Browser Service 停止時題目一仍可查詢
@@ -449,7 +449,7 @@ Case 5：拒絕未授權的 MCP Client
 本 Case 不需要額外操作 Codex Desktop；確認自動化 Log 中未帶 Token 與錯誤 Token 均為 HTTP 401，Health 仍可用。
 自動化結果比對：${RUN_LOG_DIR}/flow-2-knowledge-mcp/case-05.log
 
-人工內容核對：Case 1、2 的會議內容應與原始 PDF／PPTX 語意一致，Locator 可正確回查。
+人工內容核對：Case 1、2 的會議內容應與原始 PDF／PPTX 語意一致，Locator 可正確回查。原始自動化 Log 應繼續保留 ActionItem ID、Chunk ID、Request ID 與分數，證明只精簡最終回答，沒有刪除內部追溯資料。
 EOF
 
   cat >"${flow3_review}" <<EOF
@@ -471,17 +471,18 @@ Case 3：頁數上限為一時停止新增頁面
 
 Case 4：由 ActionItem 完成整合並保留追溯鏈
 延續 Flow 2 已取得公司研究 ActionItem 的 Codex 對話，輸入：
-   請執行剛才確認的瑞鼎科技公司資訊研究待辦，只使用允許的官方網域，完成後回傳來源與 Run Logs 摘要。
+   請執行剛才確認的瑞鼎科技公司資訊研究待辦，只使用允許的官方網域，完成後回傳研究結果、官方來源與簡潔的操作摘要。
 
-通過條件：Codex 準備呼叫 execute_action_item，執行前出現人工批准；批准後回傳可追溯的研究結果、官網來源與 Run Logs 摘要。
+通過條件：Codex 在內部沿用 ActionItem ID 呼叫 execute_action_item，執行前出現人工批准；批准後只回傳可追溯的研究結果、官網來源與使用者需要的操作摘要，不顯示 ActionItem、BrowserTask、ExecutionRequest、BrowserRun、Finding、ActionLog 的 UUID，也不直接傾印原始 Logs。
 自動化結果比對：${RUN_LOG_DIR}/flow-3-browser-task/case-04.log
+開發者追溯核對：同一份自動化 Log 必須保留完整 ActionItem → BrowserTask → ExecutionRequest → BrowserRun → Finding／ActionLog 識別鏈。
 
 Case 5：Browser Service 不可用時整合功能明確降級
 在另一個 Terminal 執行：
    docker stop ${BROWSER_CONTAINER_ID}
 
 在 Codex 中要求執行相同 ActionItem，再要求查詢 Case 1 的會議內容。
-通過條件：Browser 執行明確失敗且不建立假結果；同一對話仍可使用 search_meetings。
+通過條件：Browser 執行明確失敗且不建立假結果；最終回答以簡潔文字說明執行服務不可用，不顯示內部錯誤物件或識別碼；同一對話仍可使用 search_meetings。
 自動化結果比對：${RUN_LOG_DIR}/flow-3-browser-task/case-05.log
 
 完成本 Case 後不必重新啟動 Browser Service；回到執行腳本的 Terminal 確認人工驗證完成即可。

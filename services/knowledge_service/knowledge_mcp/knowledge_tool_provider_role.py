@@ -29,20 +29,37 @@ from shared.openai_gateway import OpenAIGateway
 from shared.settings import KnowledgeSettings
 
 
+MCP_SERVER_INSTRUCTIONS = """
+Use these tools only for the indexed meeting knowledge and its explicitly
+selected company-research actions. Treat every tool response as internal
+working data: identifiers, scores, hashes, relationship keys, raw request/run
+objects, and action logs may be used to select another tool or diagnose a
+problem, but must not be copied into a normal user-facing answer.
+
+In the final answer, present only information that helps the user understand
+or decide what to do: discussions, decisions, action-item descriptions,
+status, assignee, due date, research findings, source titles and locators,
+official source URLs, and a concise execution outcome. Cite source titles and
+locators for meeting claims and official URLs for research findings. Summarize
+an execution instead of dumping its raw response or logs. Reveal internal
+diagnostic fields only when the user explicitly asks to debug the system.
+
+If a search returns insufficient_evidence, say that the documents do not
+contain enough evidence and never infer missing facts. Use an ActionItem ID
+internally when a later tool requires it, without exposing the ID in the final
+answer. Use execute_action_item only after the user explicitly asks to execute
+the selected action; never imply that a Browser Task ran unless that tool
+returns a Browser Run result.
+""".strip()
+
+
 def create_knowledge_mcp_server(
     settings: KnowledgeSettings,
     store: KnowledgeApplicationDataStore,
 ) -> MCPServer:
     server = MCPServer(
         "meeting-action-research-assistant",
-        instructions=(
-            "Search only the indexed meeting knowledge. Present source titles and "
-            "locators with factual claims. If status is insufficient_evidence, "
-            "state that the documents do not contain enough evidence. Never infer "
-            "missing facts. Use execute_action_item only after the user explicitly "
-            "asks to execute a selected ActionItem; never imply that a Browser Task "
-            "was executed unless that tool returns a Browser Run result."
-        ),
+        instructions=MCP_SERVER_INSTRUCTIONS,
     )
 
     @server.tool()
@@ -59,6 +76,8 @@ def create_knowledge_mcp_server(
         The natural-language query is sufficient by itself. Supply optional
         project, date, status, or result-count filters only when the user's
         request makes that scope explicit. This tool never starts a browser.
+        Use returned IDs and scores only as internal working data; summarize
+        useful facts and human-readable source locations for the user.
         """
 
         request = parse_search_scope(
@@ -94,7 +113,8 @@ def create_knowledge_mcp_server(
         """Return one ActionItem and all traceable meeting evidence by stable ID.
 
         This read-only tool does not execute the action item or contact the
-        Browser service.
+        Browser service. The ID is for tool chaining; present the action's
+        content, state, scope, and human-readable evidence locations instead.
         """
 
         item = store.get_action_item(action_item_id)
@@ -114,7 +134,9 @@ def create_knowledge_mcp_server(
 
         This tool starts a bounded Browser workflow and can consume external API
         quota. Call it only after the user explicitly asks to execute the selected
-        ActionItem. Use get_action_item for read-only inspection.
+        ActionItem. Use get_action_item for read-only inspection. Summarize the
+        outcome, findings, and official URLs for the user instead of copying raw
+        run objects, internal IDs, or action logs.
         """
 
         try:
