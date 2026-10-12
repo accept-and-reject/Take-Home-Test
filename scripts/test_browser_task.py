@@ -131,6 +131,8 @@ def _result_is_traceable(
                 finding.get("status") != "found"
                 or (
                     finding.get("topic") in accepted_capture_evidence
+                    and _contains_cjk_text(finding.get("summary"))
+                    and _contains_cjk_text(finding.get("evidence_reason"))
                     and finding.get("evidence_quote")
                     == accepted_capture_evidence[finding.get("topic")][0]
                     and finding.get("evidence_reason")
@@ -249,6 +251,16 @@ def _accepted_capture_evidence(
         ):
             accepted[topic] = (evidence_quote, evidence_reason)
     return accepted
+
+
+def _contains_cjk_text(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    return any(
+        "\u3400" <= character <= "\u4dbf"
+        or "\u4e00" <= character <= "\u9fff"
+        for character in value
+    )
 
 
 def _host_allowed(url: str, allowed_domain: str) -> bool:

@@ -458,7 +458,7 @@ Flow 3 Codex Desktop 人工驗證
 請接續 Flow 2 的人工驗證，使用同一個隔離 Runtime 與 MCP URL：${MANUAL_MCP_URL}
 
 Case 1：Knowledge Service 不可用時直接完成 Browser Task
-人工核對自動化 Log：Browser found 引文必須實際支持對應 Topic；一般企業價值或產品描述不可被當作 benefits。
+人工核對自動化 Log：Browser found 的 summary 與 evidence_reason 必須是自然、簡潔的繁體中文；公司名稱、產品名稱與必要外文術語可以保留原文。evidence_quote 必須維持官網原始語言與文字，且實際支持對應 Topic；一般企業價值或產品描述不可被當作 benefits。
 自動化結果比對：${RUN_LOG_DIR}/flow-3-browser-task/case-01.log
 
 Case 2：拒絕非指定官網的任務

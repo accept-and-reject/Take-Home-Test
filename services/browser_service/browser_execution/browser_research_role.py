@@ -84,6 +84,11 @@ the topic. For supported=false, use null for summary and evidence_quote and brie
 state why the page is insufficient. evidence_reason is a concise classification
 explanation, not hidden chain-of-thought.
 
+Write summary and evidence_reason in natural, concise Traditional Chinese (zh-Hant).
+Company names, product names, and necessary technical terms may remain in their
+original language. Copy evidence_quote exactly from visible_text in its original
+language; never translate, paraphrase, or normalize the quote.
+
 Use these topic boundaries strictly:
 - company_overview: the company's identity, history, mission, positioning, or overall
   business scope.
