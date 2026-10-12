@@ -1,0 +1,13 @@
+{
+  "id": "integrated-01",
+  "title": "從會議待辦執行官網研究",
+  "mode": "mcp_agent",
+  "turns": [
+    {
+      "input": "Display Driver 專案中，瑞鼎科技公司資訊研究待辦的負責人、期限、目前狀態與資料來源是什麼？"
+    },
+    {
+      "input": "好，幫我執行這個待辦。"
+    }
+  ]
+}

@@ -7,4 +7,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 runtime-data/
-/logs/
+/logs/*
+!/logs/demo/
+/logs/demo/*
+!/logs/demo/.gitkeep

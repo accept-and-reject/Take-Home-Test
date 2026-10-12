@@ -1,0 +1,10 @@
+{
+  "id": "question-1-01",
+  "title": "發布決策查詢",
+  "mode": "mcp_agent",
+  "turns": [
+    {
+      "input": "2026-09-18 的會議中，Display Driver v2.4 RC 的發布決策是什麼？請附上文件來源。"
+    }
+  ]
+}
