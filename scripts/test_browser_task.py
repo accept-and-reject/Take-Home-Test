@@ -29,6 +29,12 @@ def _arguments() -> argparse.Namespace:
         default="http://localhost:8000",
         help="Browser Service base URL",
     )
+    parser.add_argument(
+        "--case",
+        dest="case_name",
+        choices=("flow3-case1", "flow3-case2", "flow3-case3"),
+        help="Run one formal Browser Task case instead of the legacy combined check.",
+    )
     return parser.parse_args()
 
 
@@ -255,12 +261,226 @@ def _host_allowed(url: str, allowed_domain: str) -> bool:
     return host == expected or host.endswith("." + expected)
 
 
+def _remaining_run_slots(
+    store: BrowserRunStore,
+    settings: BrowserSettings,
+) -> tuple[int, int]:
+    today_utc = datetime.now(UTC).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    started_today = store.count_started_browser_runs_since(today_utc)
+    return started_today, settings.max_daily_browser_runs - started_today
+
+
+def _run_case(
+    case_name: str,
+    *,
+    base_url: str,
+    settings: BrowserSettings,
+    store: BrowserRunStore,
+) -> int:
+    initial_run_count = store.count_browser_runs()
+    timeout = httpx2.Timeout(30.0, read=300.0)
+    started_today, remaining_today = _remaining_run_slots(store, settings)
+
+    if case_name in {"flow3-case1", "flow3-case3"} and remaining_today < 1:
+        return _print_case_result(
+            case_name,
+            False,
+            {
+                "reason": "one daily Browser Run slot is required",
+                "started_today": started_today,
+                "max_daily_browser_runs": settings.max_daily_browser_runs,
+            },
+        )
+
+    with httpx2.Client(timeout=timeout) as client:
+        if case_name == "flow3-case1":
+            health = client.get(f"{base_url}/health")
+            run_count_after_health = store.count_browser_runs()
+            max_pages = min(settings.max_pages, 5)
+            response = _submit(
+                client,
+                base_url,
+                settings.demo_api_token,
+                _task(settings, max_pages=max_pages),
+            )
+            payload = response.json()
+            final_run_count = store.count_browser_runs()
+            passed = all(
+                (
+                    health.status_code == 200,
+                    health.json().get("checks", {}).get("browser_runtime")
+                    == "ready",
+                    run_count_after_health == initial_run_count,
+                    response.status_code == 200,
+                    _result_is_traceable(
+                        payload,
+                        allowed_domain=settings.allowed_domain,
+                        max_pages=max_pages,
+                        required_found_topics={"company_overview", "products"},
+                    ),
+                    final_run_count == initial_run_count + 1,
+                )
+            )
+            return _print_case_result(
+                case_name,
+                passed,
+                {
+                    "health": health.json(),
+                    "browser_run": payload,
+                    "run_count_before": initial_run_count,
+                    "run_count_after": final_run_count,
+                },
+            )
+
+        if case_name == "flow3-case2":
+            external_task = _task(settings, max_pages=5)
+            external_task["start_url"] = "https://example.com/"
+            external_task["allowed_domain"] = "example.com"
+            external = _submit(
+                client,
+                base_url,
+                settings.demo_api_token,
+                external_task,
+            )
+            missing_field_task = _task(settings, max_pages=5)
+            missing_field_task.pop("target_company")
+            missing_field = _submit(
+                client,
+                base_url,
+                settings.demo_api_token,
+                missing_field_task,
+            )
+            unknown_topic_task = _task(settings, max_pages=5)
+            unknown_topic_task["requested_topics"] = ["unknown_topic"]
+            unknown_topic = _submit(
+                client,
+                base_url,
+                settings.demo_api_token,
+                unknown_topic_task,
+            )
+            too_many_pages = _submit(
+                client,
+                base_url,
+                settings.demo_api_token,
+                _task(settings, max_pages=6),
+            )
+            wrong_token = secrets.token_urlsafe(32)
+            if secrets.compare_digest(wrong_token, settings.demo_api_token):
+                wrong_token += "-wrong"
+            missing_token = _submit(
+                client,
+                base_url,
+                None,
+                _task(settings, max_pages=5),
+            )
+            invalid_token = _submit(
+                client,
+                base_url,
+                wrong_token,
+                _task(settings, max_pages=5),
+            )
+            external_payload = external.json()
+            final_run_count = store.count_browser_runs()
+            passed = all(
+                (
+                    external.status_code == 422,
+                    external_payload.get("status") == "rejected",
+                    external_payload.get("browser_run") is None,
+                    missing_field.status_code == 422,
+                    unknown_topic.status_code == 422,
+                    too_many_pages.status_code == 422,
+                    missing_token.status_code == 401,
+                    invalid_token.status_code == 401,
+                    final_run_count == initial_run_count,
+                )
+            )
+            return _print_case_result(
+                case_name,
+                passed,
+                {
+                    "external_domain": external_payload,
+                    "schema_rejections": {
+                        "missing_field": missing_field.json(),
+                        "unknown_topic": unknown_topic.json(),
+                        "too_many_pages": too_many_pages.json(),
+                    },
+                    "http_statuses": {
+                        "missing_token": missing_token.status_code,
+                        "invalid_token": invalid_token.status_code,
+                    },
+                    "run_count_before": initial_run_count,
+                    "run_count_after": final_run_count,
+                },
+            )
+
+        response = _submit(
+            client,
+            base_url,
+            settings.demo_api_token,
+            _task(settings, max_pages=1),
+        )
+        payload = response.json()
+        final_run_count = store.count_browser_runs()
+        passed = all(
+            (
+                response.status_code == 200,
+                _result_is_traceable(
+                    payload,
+                    allowed_domain=settings.allowed_domain,
+                    max_pages=1,
+                    require_budget_stop=True,
+                ),
+                final_run_count == initial_run_count + 1,
+            )
+        )
+        return _print_case_result(
+            case_name,
+            passed,
+            {
+                "browser_run": payload,
+                "run_count_before": initial_run_count,
+                "run_count_after": final_run_count,
+            },
+        )
+
+
+def _print_case_result(
+    case_name: str,
+    passed: bool,
+    result: dict[str, Any],
+) -> int:
+    print(
+        json.dumps(
+            {
+                "status": "passed" if passed else "failed",
+                "case": case_name,
+                "result": result,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0 if passed else 1
+
+
 def main() -> int:
     arguments = _arguments()
     settings = BrowserSettings.from_env()
     store = BrowserRunStore(settings.data_dir)
     store.initialize()
     base_url = arguments.url.rstrip("/")
+    if arguments.case_name:
+        return _run_case(
+            arguments.case_name,
+            base_url=base_url,
+            settings=settings,
+            store=store,
+        )
     wrong_token = secrets.token_urlsafe(32)
     if secrets.compare_digest(wrong_token, settings.demo_api_token):
         wrong_token += "-wrong"
