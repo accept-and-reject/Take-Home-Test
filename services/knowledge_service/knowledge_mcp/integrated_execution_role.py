@@ -156,7 +156,7 @@ def call_browser_executor(
         endpoint,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={
-            "Authorization": f"Bearer {settings.browser_executor_token}",
+            "Authorization": f"Bearer {settings.browser_api_token}",
             "Content-Type": "application/json",
             "Accept": "application/json",
         },

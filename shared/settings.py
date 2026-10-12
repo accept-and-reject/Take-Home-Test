@@ -4,8 +4,15 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+
+
+# Design: doc/03_開發規則/01_環境文件.md（環境設計規則）
+# The take-home project intentionally supports one company; deployment cannot
+# broaden that business boundary through an environment variable.
+SUPPORTED_COMPANY_NAME: Final = "瑞鼎科技"
 
 
 def _required(name: str) -> str:
@@ -38,7 +45,7 @@ class ServiceSettings(BaseModel):
     @classmethod
     def common_values(cls) -> dict[str, object]:
         return {
-            "app_env": os.getenv("APP_ENV", "development"),
+            "app_env": os.getenv("APP_ENV", "production"),
             "host": os.getenv("HOST", "0.0.0.0"),
             "port": _positive_int("PORT", 8000),
             "log_level": os.getenv("LOG_LEVEL", "INFO"),
@@ -53,9 +60,9 @@ class KnowledgeSettings(ServiceSettings):
     agent_model: str
     mcp_bearer_token: str
     browser_executor_base_url: HttpUrl
-    browser_executor_token: str
+    browser_api_token: str
     browser_request_timeout_seconds: int = Field(ge=1)
-    company_name: str
+    company_name: Literal["瑞鼎科技"]
     start_url: HttpUrl
     allowed_domain: str
 
@@ -73,11 +80,11 @@ class KnowledgeSettings(ServiceSettings):
             agent_model=os.getenv("KNOWLEDGE_AGENT_MODEL", "gpt-6-luna"),
             mcp_bearer_token=_required("MCP_BEARER_TOKEN"),
             browser_executor_base_url=_required("BROWSER_EXECUTOR_BASE_URL"),
-            browser_executor_token=_required("BROWSER_EXECUTOR_TOKEN"),
+            browser_api_token=_required("BROWSER_API_TOKEN"),
             browser_request_timeout_seconds=_positive_int(
                 "BROWSER_REQUEST_TIMEOUT_SECONDS", 180
             ),
-            company_name=_required("COMPANY_NAME"),
+            company_name=SUPPORTED_COMPANY_NAME,
             start_url=_required("START_URL"),
             allowed_domain=_required("ALLOWED_DOMAIN"),
         )
@@ -88,9 +95,8 @@ class BrowserSettings(ServiceSettings):
     data_dir: Path
     agent_model: str
     agent_reasoning_effort: str
-    browser_executor_token: str
-    demo_api_token: str
-    company_name: str
+    browser_api_token: str
+    company_name: Literal["瑞鼎科技"]
     start_url: HttpUrl
     allowed_domain: str
     max_pages: int = Field(ge=1, le=5)
@@ -107,9 +113,8 @@ class BrowserSettings(ServiceSettings):
             data_dir=Path(os.getenv("BROWSER_DATA_DIR", "/app/data")),
             agent_model=os.getenv("AGENT_MODEL", "gpt-6-luna"),
             agent_reasoning_effort=os.getenv("AGENT_REASONING_EFFORT", "low"),
-            browser_executor_token=_required("BROWSER_EXECUTOR_TOKEN"),
-            demo_api_token=_required("DEMO_API_TOKEN"),
-            company_name=_required("COMPANY_NAME"),
+            browser_api_token=_required("BROWSER_API_TOKEN"),
+            company_name=SUPPORTED_COMPANY_NAME,
             start_url=_required("START_URL"),
             allowed_domain=_required("ALLOWED_DOMAIN"),
             max_pages=_positive_int("MAX_PAGES", 5),

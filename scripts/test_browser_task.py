@@ -13,7 +13,7 @@ from uuid import uuid4
 import httpx2
 
 from services.browser_service.store import BrowserRunStore
-from shared.settings import BrowserSettings
+from shared.settings import BrowserSettings, SUPPORTED_COMPANY_NAME
 
 
 FINAL_RUN_STATUSES = {"completed", "partial"}
@@ -317,7 +317,7 @@ def _run_case(
             response = _submit(
                 client,
                 base_url,
-                settings.demo_api_token,
+                settings.browser_api_token,
                 _task(settings, max_pages=max_pages),
             )
             payload = response.json()
@@ -351,12 +351,13 @@ def _run_case(
 
         if case_name == "flow3-case2":
             external_task = _task(settings, max_pages=5)
+            external_task["target_company"] = "其他公司"
             external_task["start_url"] = "https://example.com/"
             external_task["allowed_domain"] = "example.com"
             external = _submit(
                 client,
                 base_url,
-                settings.demo_api_token,
+                settings.browser_api_token,
                 external_task,
             )
             missing_field_task = _task(settings, max_pages=5)
@@ -364,7 +365,7 @@ def _run_case(
             missing_field = _submit(
                 client,
                 base_url,
-                settings.demo_api_token,
+                settings.browser_api_token,
                 missing_field_task,
             )
             unknown_topic_task = _task(settings, max_pages=5)
@@ -372,17 +373,17 @@ def _run_case(
             unknown_topic = _submit(
                 client,
                 base_url,
-                settings.demo_api_token,
+                settings.browser_api_token,
                 unknown_topic_task,
             )
             too_many_pages = _submit(
                 client,
                 base_url,
-                settings.demo_api_token,
+                settings.browser_api_token,
                 _task(settings, max_pages=6),
             )
             wrong_token = secrets.token_urlsafe(32)
-            if secrets.compare_digest(wrong_token, settings.demo_api_token):
+            if secrets.compare_digest(wrong_token, settings.browser_api_token):
                 wrong_token += "-wrong"
             missing_token = _submit(
                 client,
@@ -397,12 +398,22 @@ def _run_case(
                 _task(settings, max_pages=5),
             )
             external_payload = external.json()
+            external_rejection_reason = str(
+                (external_payload.get("execution_request") or {}).get(
+                    "rejection_reason"
+                )
+                or ""
+            )
             final_run_count = store.count_browser_runs()
             passed = all(
                 (
                     external.status_code == 422,
                     external_payload.get("status") == "rejected",
                     external_payload.get("browser_run") is None,
+                    settings.company_name == SUPPORTED_COMPANY_NAME,
+                    "target_company" in external_rejection_reason,
+                    "start_url" in external_rejection_reason,
+                    "allowed_domain" in external_rejection_reason,
                     missing_field.status_code == 422,
                     unknown_topic.status_code == 422,
                     too_many_pages.status_code == 422,
@@ -416,6 +427,8 @@ def _run_case(
                 passed,
                 {
                     "external_domain": external_payload,
+                    "supported_company": settings.company_name,
+                    "scope_rejection_reason": external_rejection_reason,
                     "schema_rejections": {
                         "missing_field": missing_field.json(),
                         "unknown_topic": unknown_topic.json(),
@@ -433,7 +446,7 @@ def _run_case(
         response = _submit(
             client,
             base_url,
-            settings.demo_api_token,
+            settings.browser_api_token,
             _task(settings, max_pages=1),
         )
         payload = response.json()
@@ -494,7 +507,7 @@ def main() -> int:
             store=store,
         )
     wrong_token = secrets.token_urlsafe(32)
-    if secrets.compare_digest(wrong_token, settings.demo_api_token):
+    if secrets.compare_digest(wrong_token, settings.browser_api_token):
         wrong_token += "-wrong"
 
     today_utc = datetime.now(UTC).replace(
@@ -533,7 +546,7 @@ def main() -> int:
         full_run = _submit(
             client,
             base_url,
-            settings.demo_api_token,
+            settings.browser_api_token,
             full_task,
         )
 
@@ -541,17 +554,18 @@ def main() -> int:
         one_page_run = _submit(
             client,
             base_url,
-            settings.demo_api_token,
+            settings.browser_api_token,
             one_page_task,
         )
 
         external_task = _task(settings, max_pages=5)
+        external_task["target_company"] = "其他公司"
         external_task["start_url"] = "https://example.com/"
         external_task["allowed_domain"] = "example.com"
         external = _submit(
             client,
             base_url,
-            settings.demo_api_token,
+            settings.browser_api_token,
             external_task,
         )
 
@@ -560,7 +574,7 @@ def main() -> int:
         missing_field = _submit(
             client,
             base_url,
-            settings.demo_api_token,
+            settings.browser_api_token,
             missing_field_task,
         )
 
@@ -569,7 +583,7 @@ def main() -> int:
         unknown_topic = _submit(
             client,
             base_url,
-            settings.demo_api_token,
+            settings.browser_api_token,
             unknown_topic_task,
         )
 
@@ -577,7 +591,7 @@ def main() -> int:
         too_many_pages = _submit(
             client,
             base_url,
-            settings.demo_api_token,
+            settings.browser_api_token,
             too_many_pages_task,
         )
 
@@ -589,6 +603,12 @@ def main() -> int:
     full_payload = full_run.json()
     one_page_payload = one_page_run.json()
     external_payload = external.json()
+    external_rejection_reason = str(
+        (external_payload.get("execution_request") or {}).get(
+            "rejection_reason"
+        )
+        or ""
+    )
     passed = all(
         (
             health.status_code == 200,
@@ -611,6 +631,10 @@ def main() -> int:
             external.status_code == 422,
             external_payload.get("status") == "rejected",
             external_payload.get("browser_run") is None,
+            settings.company_name == SUPPORTED_COMPANY_NAME,
+            "target_company" in external_rejection_reason,
+            "start_url" in external_rejection_reason,
+            "allowed_domain" in external_rejection_reason,
             missing_field.status_code == 422,
             unknown_topic.status_code == 422,
             too_many_pages.status_code == 422,
@@ -628,6 +652,7 @@ def main() -> int:
                 "one_page_browser_run": one_page_payload,
                 "rejections": {
                     "external_domain": external_payload,
+                    "scope_rejection_reason": external_rejection_reason,
                     "missing_field": missing_field.json(),
                     "unknown_topic": unknown_topic.json(),
                     "too_many_pages": too_many_pages.json(),

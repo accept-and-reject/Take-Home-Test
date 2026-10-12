@@ -16,9 +16,8 @@ from services.browser_service.browser_task_gateway.browser_service_status_role i
     report_browser_service_health,
 )
 from services.browser_service.browser_task_gateway.browser_task_interface_role import (
-    CallerKind,
     accept_browser_task,
-    authenticate_browser_caller,
+    authenticate_browser_token,
     return_browser_task_result,
 )
 from services.browser_service.store import BrowserRunStore
@@ -41,15 +40,13 @@ class BrowserTaskSubmission(BaseModel):
     browser_task: dict[str, Any]
 
 
-def _authenticated_caller(authorization: str | None) -> CallerKind:
-    caller = authenticate_browser_caller(authorization, SETTINGS)
-    if caller is None:
+def _authenticate_browser_request(authorization: str | None) -> None:
+    if not authenticate_browser_token(authorization, SETTINGS):
         raise HTTPException(
             status_code=401,
             detail="invalid or missing bearer token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return caller
 
 
 @app.get("/")
@@ -79,7 +76,7 @@ def submit_browser_task(
     submission: BrowserTaskSubmission,
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
-    caller = _authenticated_caller(authorization)
+    _authenticate_browser_request(authorization)
     slot_acquired = RUN_SLOTS.acquire(blocking=False)
     try:
         execution_policy_reason = None
@@ -100,7 +97,6 @@ def submit_browser_task(
         status_code, content = accept_browser_task(
             submission.browser_task,
             submission.user_instruction,
-            caller,
             SETTINGS,
             STORE,
             execution_policy_reason=execution_policy_reason,
@@ -126,7 +122,7 @@ def get_browser_task_result(
     execution_request_id: UUID,
     authorization: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
-    _authenticated_caller(authorization)
+    _authenticate_browser_request(authorization)
     content = return_browser_task_result(execution_request_id, STORE)
     return JSONResponse(
         status_code=404 if content["status"] == "not_found" else 200,

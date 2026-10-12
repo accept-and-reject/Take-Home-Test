@@ -120,8 +120,7 @@ check_required_env() {
   for key in \
     OPENAI_API_KEY \
     MCP_BEARER_TOKEN \
-    BROWSER_EXECUTOR_TOKEN \
-    DEMO_API_TOKEN \
+    BROWSER_API_TOKEN \
     START_URL \
     ALLOWED_DOMAIN
   do
@@ -133,6 +132,20 @@ check_required_env() {
         ;;
     esac
   done
+}
+
+check_fixed_runtime_configuration() {
+  if grep -Eq 'COMPANY_NAME|BROWSER_EXECUTOR_TOKEN|DEMO_API_TOKEN' \
+    .env .env.example compose.yaml
+  then
+    return 1
+  fi
+
+  [[ "$(grep -c 'BROWSER_API_TOKEN:' compose.yaml)" -eq 2 ]] || return 1
+  grep -qx 'APP_ENV=development' .env.example || return 1
+  grep -qx 'LOG_LEVEL=DEBUG' .env.example || return 1
+  [[ "$(grep -c 'APP_ENV: ${APP_ENV:-development}' compose.yaml)" -eq 2 ]] || return 1
+  [[ "$(grep -c 'LOG_LEVEL: ${LOG_LEVEL:-DEBUG}' compose.yaml)" -eq 2 ]] || return 1
 }
 
 wait_for_service_health() {
@@ -164,6 +177,10 @@ check_environment() {
     "runtime-isolation/environment/compose-config" \
     "隔離測試用 Compose 設定有效" \
     compose config --quiet
+  run_check \
+    "runtime-isolation/environment/fixed-runtime-configuration" \
+    "固定業務邊界、單一 Browser Token 與本地預設均正確" \
+    check_fixed_runtime_configuration
 
   local fixture
   for fixture in \
@@ -198,6 +215,16 @@ use_knowledge_only() {
     "runtime-isolation/knowledge-only/health" \
     "Knowledge-only：Browser 不可用時仍可啟動" \
     wait_for_service_health knowledge-mcp-service
+  run_check \
+    "runtime-isolation/knowledge-only/fixed-runtime-configuration" \
+    "Knowledge Service 使用固定公司、單一 Browser Token 與 Development 設定" \
+    compose exec -T knowledge-mcp-service \
+    sh -c 'test "$APP_ENV" = development && test "$LOG_LEVEL" = DEBUG && test -z "${COMPANY_NAME+x}" && test -n "$BROWSER_API_TOKEN" && test -z "${BROWSER_EXECUTOR_TOKEN+x}" && test -z "${DEMO_API_TOKEN+x}"'
+  run_check \
+    "runtime-isolation/knowledge-only/production-safe-defaults" \
+    "未覆寫時使用 Production 與 INFO 安全預設" \
+    compose exec -T knowledge-mcp-service \
+    python -c 'import os; os.environ.pop("APP_ENV", None); os.environ.pop("LOG_LEVEL", None); from shared.settings import ServiceSettings; values = ServiceSettings.common_values(); assert values["app_env"] == "production"; assert values["log_level"] == "INFO"'
 }
 
 test_ingestion() {
@@ -265,6 +292,11 @@ use_browser_only() {
     "runtime-isolation/browser-only/health" \
     "Browser-only：Knowledge 不可用時仍可啟動" \
     wait_for_service_health browser-executor-service
+  run_check \
+    "runtime-isolation/browser-only/fixed-runtime-configuration" \
+    "Browser Service 使用固定公司、單一 Browser Token 與 Development 設定" \
+    compose exec -T browser-executor-service \
+    sh -c 'test "$APP_ENV" = development && test "$LOG_LEVEL" = DEBUG && test -z "${COMPANY_NAME+x}" && test -n "$BROWSER_API_TOKEN" && test -z "${BROWSER_EXECUTOR_TOKEN+x}" && test -z "${DEMO_API_TOKEN+x}"'
 }
 
 prepare_knowledge_flows() {
@@ -462,7 +494,7 @@ Case 1：Knowledge Service 不可用時直接完成 Browser Task
 自動化結果比對：${RUN_LOG_DIR}/flow-3-browser-task/case-01.log
 
 Case 2：拒絕非指定官網的任務
-本 Case 不需要額外操作 Codex Desktop；確認 Log 中請求被拒絕，且沒有建立 BrowserRun。
+本 Case 不需要額外操作 Codex Desktop；確認 Log 中 target_company 為「其他公司」，拒絕原因同時包含公司、起始 URL 與允許網域超出範圍，且沒有建立 BrowserRun。
 自動化結果比對：${RUN_LOG_DIR}/flow-3-browser-task/case-02.log
 
 Case 3：頁數上限為一時停止新增頁面

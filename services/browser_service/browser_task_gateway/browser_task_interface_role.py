@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import secrets
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any
 from uuid import UUID, uuid4
 
 from services.browser_service.browser_task_gateway.browser_task_validation_role import (
@@ -15,36 +15,27 @@ from services.browser_service.store import BrowserRunStore
 from shared.contracts import (
     BrowserRun,
     BrowserRunStatus,
-    BrowserTaskSource,
     ExecutionRequest,
     ExecutionValidationStatus,
 )
 from shared.settings import BrowserSettings
 
 
-CallerKind = Literal["demo", "service"]
-
-
-def authenticate_browser_caller(
+def authenticate_browser_token(
     authorization: str | None,
     settings: BrowserSettings,
-) -> CallerKind | None:
+) -> bool:
     if authorization is None:
-        return None
+        return False
     scheme, separator, credential = authorization.partition(" ")
     if separator != " " or scheme.casefold() != "bearer":
-        return None
-    if secrets.compare_digest(credential, settings.browser_executor_token):
-        return "service"
-    if secrets.compare_digest(credential, settings.demo_api_token):
-        return "demo"
-    return None
+        return False
+    return secrets.compare_digest(credential, settings.browser_api_token)
 
 
 def accept_browser_task(
     payload: object,
     user_instruction: str,
-    caller: CallerKind,
     settings: BrowserSettings,
     store: BrowserRunStore,
     *,
@@ -63,10 +54,6 @@ def accept_browser_task(
     task = schema_result.task
     scope_result = validate_task_scope(task, settings)
     reasons = list(scope_result.reasons)
-    if caller == "demo" and task.task_source is not BrowserTaskSource.DIRECT:
-        reasons.append("demo credentials may only submit direct tasks")
-    if caller == "service" and task.task_source is not BrowserTaskSource.ACTION_ITEM:
-        reasons.append("service credentials require an action_item task")
     has_validation_rejection = bool(reasons)
     if execution_policy_reason is not None:
         reasons.append(execution_policy_reason)
