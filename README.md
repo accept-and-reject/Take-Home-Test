@@ -33,6 +33,12 @@
 - **Remote MCP：** [https://knowledge-mcp.zeabur.app/mcp](https://knowledge-mcp.zeabur.app/mcp)
 - **Browser Service：** [https://browser-executor.zeabur.app](https://browser-executor.zeabur.app)
 
+## 人工驗收證據
+
+> **用途：** 讓審查者不必先啟動系統，也能直接查看一次真實執行的問答、來源核對與 Browser Run Logs
+
+- [查看整合流程、題目一與題目三的人工驗收結果](./evidence/README.md)
+
 ## Key assumptions
 
 > **用途：** 說明作品主動採用的執行條件和業務範圍，讓審查者知道本次實作的限縮條件
@@ -47,8 +53,6 @@
 - 主機可透過 HTTPS 連線 OpenAI API 與瑞鼎科技官網
 - 設定腳本不會安裝或修改主機層級工具
 - API Key 與 Token 只透過 `.env` 或部署平台 Secret 提供，不寫入 Repository
-  - 驗證公開部署的系統所需的 MCP／Browser Token 會在交付 Email 的私人 README 中另行提供
-  - OpenAI API Key 不會提供
 
 ### 業務情境
 
@@ -108,6 +112,8 @@ cd Take-Home-Test
 
 1. 在「是否使用已部署的 Cloud Service 驗證？」輸入 `y`
 2. 輸入 Knowledge／Browser Public URL、OpenAI API Key、MCP Bearer Token 與 Browser API Token；Secret 輸入不會顯示於終端
+   - 驗證公開部署的系統所需的 MCP／Browser Token 會在交付 Email 的私人 README 中另行提供
+   - OpenAI API Key 不會提供
 3. 腳本只會建立本機展示 Client 使用的 `.env`，不會部署、修改或重新匯入 Cloud Service
 
 ### 建立展示 Client
